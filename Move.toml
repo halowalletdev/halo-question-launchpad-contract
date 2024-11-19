@@ -1,0 +1,21 @@
+[package]
+name = "halo-question-launchpad-contract"
+version = "1.0.0"
+authors = []
+upgrade_policy = "compatible"
+
+[addresses]
+minter = "_"
+owner = "_"
+admin_signer = "_"
+fee_recipient = "_"
+
+[dev-addresses]
+minter = "0x100"
+owner = "0x200"
+admin_signer = "0x300"
+fee_recipient = "0x400"
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "main" }
+
+[dev-dependencies]
