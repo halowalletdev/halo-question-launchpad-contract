@@ -29,8 +29,6 @@ module minter::launchpad {
     const ECANNOT_CLAIM: u64 = 14;
     const ECANNOT_REPEAT_ONLOOK: u64 = 15;
     const EEXCESS_LIMIT: u64 = 16;
-    const EINVALID_PERMILLAGE: u64 = 17;
-    const EINVALID_ALLOCATE: u64 = 18;
     const EINVALID_NUM: u64 = 19;
     const EINVALID_ARG: u64 = 20;
     const EINVALID_ANSWERER: u64 = 21;
@@ -38,6 +36,7 @@ module minter::launchpad {
     ///////////////////////  structs  ///////////////////////
     struct Management has key {
         owner: address,
+        pending_owner: address,
         admin_signer: address, // provide signatures for users
         global_signer_cap: SignerCapability
     }
@@ -223,6 +222,7 @@ module minter::launchpad {
             &resource_account,
             Management {
                 owner: @owner,
+                pending_owner: @0x0,
                 admin_signer: @admin_signer,
                 global_signer_cap: signer_cap
             }
@@ -246,7 +246,7 @@ module minter::launchpad {
                     to_last_onlooker_pct: 30,
                     to_platform_pct: 5
                 },
-                global_const_P: 100, 
+                global_const_P: 100,
                 global_onlook_allocate_belowP: OnlookPhaseAllocate {
                     to_questioners_pct: 30,
                     to_answers_pct: 30,
@@ -459,12 +459,13 @@ module minter::launchpad {
             error::not_found(EINVALID_ID)
         );
         let question = borrow_global_mut<Question<CoinType>>(question_addr);
-        // check: not closed + in answer phase + has't followed before
+        // check: not closed + in answer phase + has't followed before + not answerer
         let now_time: u64 = timestamp::now_seconds();
         assert!(
             !question.is_closed
                 && now_time < question.answer_end_at
-                && !vector::contains(&question.questioners, &follower_addr),
+                && !vector::contains(&question.questioners, &follower_addr)
+                && !smart_table::contains(&question.answer_vote_details, follower_addr),
             error::invalid_state(ECANNOT_FOLLOW)
         );
 
@@ -1059,27 +1060,27 @@ module minter::launchpad {
         question.specified_answerer = option::some(specified_answerer);
     }
 
-    public entry fun set_question_end_time<CoinType>(
-        admin_signer: &signer,
-        question_id: String,
-        new_answer_end_time: u64,
-        new_onlook_end_time: u64
-    ) acquires Management, Question {
-        // check authority
-        check_is_admin_signer(admin_signer);
-        // question related verify
-        let question_addr: address = question_resource_address(question_id);
-        assert!(
-            exists<Question<CoinType>>(question_addr),
-            error::not_found(EINVALID_ID)
-        );
-        let question: &mut Question<CoinType> =
-            borrow_global_mut<Question<CoinType>>(question_addr);
+    // public entry fun set_question_end_time<CoinType>(
+    //     admin_signer: &signer,
+    //     question_id: String,
+    //     new_answer_end_time: u64,
+    //     new_onlook_end_time: u64
+    // ) acquires Management, Question {
+    //     // check authority
+    //     check_is_admin_signer(admin_signer);
+    //     // question related verify
+    //     let question_addr: address = question_resource_address(question_id);
+    //     assert!(
+    //         exists<Question<CoinType>>(question_addr),
+    //         error::not_found(EINVALID_ID)
+    //     );
+    //     let question: &mut Question<CoinType> =
+    //         borrow_global_mut<Question<CoinType>>(question_addr);
 
-        // update
-        question.answer_end_at = new_answer_end_time;
-        question.onlook_end_at = new_onlook_end_time;
-    }
+    //     // update
+    //     question.answer_end_at = new_answer_end_time;
+    //     question.onlook_end_at = new_onlook_end_time;
+    // }
 
     public entry fun batch_add_bonus_to_last_onlooker<CoinType>(
         admin_signer: &signer, question_ids: vector<String>, amounts: vector<u64>
@@ -1151,9 +1152,23 @@ module minter::launchpad {
             error::unauthenticated(EUNAUTHORIZED)
         );
         // update
-        management.owner = new_owner;
+        management.pending_owner = new_owner;
         // event
-        event::emit(OwnershipTransferredEvent { new_owner });
+    }
+
+    public entry fun accept_ownership(new_owner: &signer) acquires Management {
+        // verify pending owner
+        let management: &mut Management =
+            borrow_global_mut<Management>(config_resource_address());
+        assert!(
+            signer::address_of(new_owner) == management.pending_owner,
+            error::unauthenticated(EUNAUTHORIZED)
+        );
+        // update
+        management.owner = signer::address_of(new_owner);
+        management.pending_owner = @0x0;
+        // event
+        event::emit(OwnershipTransferredEvent { new_owner: management.owner });
     }
 
     public entry fun update_basic_configs_by_owner(
